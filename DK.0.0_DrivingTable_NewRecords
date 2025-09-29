@@ -1,0 +1,197 @@
+DECLARE @DW_FromDate AS INT 
+DECLARE @DKStart AS INT 
+--DECLARE @CYr AS INT			--Relates to Start of Collection period
+DECLARE @CYrE AS INT		--Relates to End of Collection period
+DECLARE @LoadID AS INT		--Relates to End of Collection period
+
+SET @DW_FromDate =20240801
+SET @CYrE =LEFT(@DW_FromDate,4)+'0731'
+SET @LoadID=CAST(CONVERT(VARCHAR(30), GETDATE(), 112) AS INT)
+
+
+
+
+--DK_Student------------------------------------------------
+SET @DKStart = (SELECT MAX (DK_Student) FROM Student.DK_Student)
+PRINT 'DK_Student_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_Student_StartFrom 4913815
+
+INSERT INTO [Student].[DK_Student]
+           ([DK_Student]
+           ,[INSTID]
+           ,[SID])
+
+
+		SELECT DISTINCT 
+		DK_Student			=DENSE_RANK() OVER (ORDER BY N.INSTID,N.SID) + @DKStart ,
+		N.INSTID,
+		N.SID
+
+		FROM [dbo].[V_StudentNames] N
+			LEFT OUTER JOIN Student.DK_Student C ON ISNULL(CAST(C.INSTID AS VARCHAR(250)),'')=ISNULL(CAST(N.INSTID AS VARCHAR(250)),'') AND 
+			ISNULL(CAST(C.SID AS VARCHAR(250)),'')=ISNULL(CAST(N.SID AS VARCHAR(250)),'')
+
+		WHERE C.SID IS NULL
+        
+
+
+--DK_StudentInitiatives------------------------------------------------
+SET @DKStart = (SELECT MAX (DK_StudentInitiatives) FROM Student.DK_StudentInitiatives)
+PRINT 'DK_StudentInitiatives_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_StudentInitiatives_StartFrom 3797311
+INSERT INTO [Student].[DK_StudentInitiatives](
+			INSTID, 
+			NUMHUS,
+			SID, 
+			DK_StudentInitiatives)
+
+SELECT DISTINCT
+  N.[INSTID]
+, N.NUMHUS
+, N.[SID]
+,CAST(DENSE_RANK () OVER (ORDER BY N.INSTID, N.NUMHUS, N.SID)AS INT) + @DKStart DK_StudentInitiatives
+
+
+  FROM [dbo].[V_StudentInitiatives] n
+  LEFT OUTER JOIN [Student].[DK_StudentInitiatives] c ON c.INSTID = n.INSTID AND c.NUMHUS = n.NUMHUS AND c.SID = n.SID
+  		WHERE C.SID IS NULL
+
+--DK_StudentEngagement------------------------------------------------
+SET @DKStart = (SELECT MAX (DK_StudentEngagement) FROM Student.DK_StudentEngagement)
+PRINT 'DK_StudentEngagement_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_StudentEngagement_StartFrom 5059034
+INSERT INTO [Student].[DK_StudentEngagement](
+INSTID, NUMHUS,SID, DK_StudentEngagement)
+
+SELECT DISTINCT
+ N.INSTID
+,N.NUMHUS
+,N.SID
+,CAST(DENSE_RANK () OVER (ORDER BY N.INSTID,N.NUMHUS,N.SID)AS INT)+ (SELECT MAX (DK_StudentEngagement) FROM Student.DK_StudentEngagement)--@DKStart  DK_StudentEngagement
+--,'' SCSESSIONID
+--,CAST(DENSE_RANK () OVER (ORDER BY N.INSTID,N.NUMHUS,N.SID)AS INT)+ @DKStart  DK_StudentEngagement
+	FROM [dbo].[V_StudentEngagement] N
+		LEFT OUTER JOIN (SELECT DISTINCT INSTID,NUMHUS,SID FROM Student.DK_StudentEngagement) C ON C.INSTID = N.INSTID AND C.NUMHUS = N.NUMHUS AND C.SID = N.SID
+  		
+		WHERE C.SID IS NULL
+
+
+--DK_StudentCourseSession----Part 1--------------------------------------------
+SET @DKStart = (SELECT MAX (DK_StudentCourseSession) FROM Student.DK_StudentCourseSession)
+PRINT 'DK_StudentCourseSession_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_StudentCourseSession_StartFrom 7290554
+
+INSERT INTO [Student].[DK_StudentCourseSession](
+INSTID, NUMHUS,SID,SCSESSIONID, DK_StudentCourseSession,DK_StudentEngagement,DK_StudentInitiatives,DK_Student)
+
+SELECT 
+ SCS.[INSTID]
+, SCS.NUMHUS
+, SCS.[SID]
+, SCS.SCSESSIONID
+,CAST(DENSE_RANK () OVER (ORDER BY  SCS.INSTID, SCS.NUMHUS, SCS.SID, SCS.SCSESSIONID)AS INT)+@DKStart DK_StudentCourseSession
+,ISNULL(E.DK_StudentEngagement,0)			DK_StudentEngagement
+,ISNULL(SI.DK_StudentInitiatives,0)			DK_StudentInitiatives
+,ISNULL(S.DK_Student,0)						DK_Student
+  FROM [dbo].V_StudentEngagement SCS --3,825,801
+	LEFT OUTER JOIN [Student].[DK_StudentInitiatives] SI ON SI.INSTID = SCS.INSTID AND SI.NUMHUS = SCS.NUMHUS AND SI.SID = SCS.SID
+	LEFT OUTER JOIN [Student].[DK_StudentEngagement] E ON E.INSTID = SCS.INSTID AND E.NUMHUS = SCS.NUMHUS  AND E.SID = SCS.SID 
+	LEFT OUTER JOIN [Student].[DK_Student] S ON S.INSTID = SCS.INSTID AND S.SID = SCS.SID
+	LEFT OUTER JOIN [Student].[DK_StudentCourseSession] x ON x.INSTID = E.INSTID AND x.NUMHUS = E.NUMHUS  AND x.SID = E.SID  AND x.SCSESSIONID=SCS.SCSESSIONID
+		WHERE x.SID IS NULL
+
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[SCS]') AND type IN (N'U'))
+DROP TABLE [dbo].[SCS];
+
+SET @DKStart = (SELECT MAX (DK_StudentCourseSession) FROM Student.DK_StudentCourseSession)
+PRINT 'DK_StudentCourseSession_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_StudentCourseSession_StartFrom 7291167
+SELECT 
+ SCS.[INSTID]
+, SCS.NUMHUS
+, SCS.[SID]
+, SCS.SCSESSIONID
+,CAST(DENSE_RANK () OVER (ORDER BY  SCS.INSTID, SCS.NUMHUS, SCS.SID, SCS.SCSESSIONID)AS INT)+@DKStart+1 DK_StudentCourseSession
+ INTO dbo.SCS
+ FROM [dbo].V_StudentCourseSession SCS --3,825,801
+	LEFT OUTER JOIN [Student].[DK_StudentCourseSession] x ON x.INSTID = SCS.INSTID AND x.NUMHUS = SCS.NUMHUS  AND x.SID = SCS.SID  AND x.SCSESSIONID=SCS.SCSESSIONID
+		WHERE x.SID IS NULL
+;
+
+
+		INSERT INTO [Student].[DK_StudentCourseSession](
+		INSTID, NUMHUS,SID,SCSESSIONID, DK_StudentCourseSession,DK_StudentEngagement,DK_StudentInitiatives,DK_Student)
+
+
+		SELECT 
+		SCS.INSTID, SCS.NUMHUS, SCS.SID, SCS.SCSESSIONID,SCS.DK_StudentCourseSession
+		,ISNULL(E.DK_StudentEngagement,0)			DK_StudentEngagement
+		,ISNULL(SI.DK_StudentInitiatives,0)			DK_StudentInitiatives
+		,ISNULL(S.DK_Student,0)						DK_Student
+		FROM 
+		dbo.SCS SCS
+			JOIN [Student].[DK_StudentInitiatives] SI ON SI.INSTID = SCS.INSTID AND SI.NUMHUS = SCS.NUMHUS AND SI.SID = SCS.SID
+			JOIN [Student].[DK_StudentEngagement] E ON E.INSTID = SCS.INSTID AND E.NUMHUS = SCS.NUMHUS  AND E.SID = SCS.SID 
+			JOIN [Student].[DK_Student] S ON S.INSTID = SCS.INSTID AND S.SID = SCS.SID
+;
+
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[SCS]') AND type IN (N'U'))
+DROP TABLE [dbo].[SCS];
+
+
+--DK_StudentCourseSession----Part 2--------------------------------------------
+SET @DKStart = (SELECT MAX (DK_StudentCourseSession) FROM Student.DK_StudentCourseSession)
+-- this picked up an additional 7,102 records on V_StudentCourseSession in th test 2023 year
+;
+PRINT 'DK_StudentCourseSession_StartFrom '+CAST(@DKStart AS VARCHAR(10))
+--DK_StudentCourseSession_StartFrom 7291182
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.SCSRound2') AND type IN (N'U'))
+DROP TABLE dbo.SCSRound2;
+
+		SELECT 
+		SCS.INSTID
+		,SCS.NUMHUS
+		,SCS.SID
+		,SCS.SCSESSIONID
+		,CAST(DENSE_RANK () OVER (ORDER BY  SCS.INSTID, SCS.NUMHUS, SCS.SID, SCS.SCSESSIONID)AS INT)+@DKStart DK_StudentCourseSession
+		INTO dbo.SCSRound2
+		  FROM [dbo].[V_StudentCourseSession] SCS --3,825,801
+			LEFT OUTER JOIN [Student].[DK_StudentCourseSession] DK_Drive
+			ON SCS.INSTID = DK_Drive.INSTID AND SCS.NUMHUS = DK_Drive.NUMHUS AND SCS.SID = DK_Drive.SID AND SCS.SCSESSIONID = DK_Drive.SCSESSIONID
+		WHERE DK_Drive.INSTID IS NULL
+;
+
+
+	INSERT INTO Student.DK_StudentCourseSession (INSTID,NUMHUS,SID,SCSESSIONID,DK_StudentCourseSession,DK_StudentEngagement,DK_StudentInitiatives,DK_Student)
+
+	SELECT
+	SCS.INSTID,
+	SCS.NUMHUS,
+	SCS.SID,
+	SCS.SCSESSIONID,
+	SCS.DK_StudentCourseSession
+	,ISNULL(E.DK_StudentEngagement,0)			DK_StudentEngagement
+	,ISNULL(SI.DK_StudentInitiatives,0)			DK_StudentInitiatives
+	,ISNULL(S.DK_Student,0)						DK_Student
+	FROM dbo.SCSRound2 SCS
+		LEFT OUTER JOIN [Student].[DK_StudentInitiatives] SI ON SI.INSTID = SCS.INSTID AND SI.NUMHUS = SCS.NUMHUS AND SI.SID = SCS.SID
+		LEFT OUTER JOIN [Student].[DK_StudentEngagement] E ON E.INSTID = SCS.INSTID AND E.NUMHUS = SCS.NUMHUS  AND E.SID = SCS.SID 
+		LEFT OUTER JOIN [Student].[DK_Student] S ON S.INSTID = SCS.INSTID AND S.SID = SCS.SID
+	;
+
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.SCSRound2') AND type IN (N'U'))
+DROP TABLE dbo.SCSRound2;
+
+
+
+--backwards load SCS table with DK_StudentEngagement from DK_StudentEngagement where SCS was 0 (happernd in first year of load).
+  UPDATE SCS SET SCS.DK_StudentEngagement=SE.DK_StudentEngagement
+  FROM Student.DK_StudentCourseSession SCS
+	JOIN [Student].[DK_StudentEngagement] SE ON SE.INSTID = SCS.INSTID AND SE.NUMHUS = SCS.NUMHUS AND SE.SID = SCS.SID
+    WHERE SCS.DK_StudentEngagement=0
+
+
