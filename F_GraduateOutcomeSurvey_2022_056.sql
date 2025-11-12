@@ -91,7 +91,6 @@ SELECT * INTO GOSub FROM [GradOutcomes].[C072_Core] G WHERE G.DW_FromDate = @fro
 --g.XMLOCUC looks to have been removed resulting in S_CountyOfUK_GO -1
 --HERE
 
-
 DROP TABLE IF EXISTS dbo.DIS;
 
 		SELECT DISTINCT   INSTID, SID, 
@@ -101,10 +100,17 @@ DROP TABLE IF EXISTS dbo.DIS;
 		FROM [Student].[V056_Disability]  
 		--FROM HDP.[V_Disability] --526364
 		WHERE DISABILITY NOT IN( '', '00', '95', '98', '99' )
-		AND DW_FromDate = 20220801
+		AND DW_FromDate = @fromdater
 		;
 --SELECT COUNT(*), dw_fromdate FROM Fact.F_GraduateOutcomeSurvey GROUP BY DW_FromDate
 
+-- Added to deal with those who return Prefer not to say. In line with Student. #2025LP
+DROP TABLE IF EXISTS dbo.DIS_98;
+		SELECT INSTID,SID,DISABILITY 
+		INTO dbo.DIS_98
+		FROM [Student].[V056_Disability]  
+		WHERE DISABILITY = '98'
+		AND DW_FromDate = @fromdater
 
 WHILE (SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'postcodersub')>0 
 BEGIN DROP TABLE postcodersub END 
@@ -118,7 +124,6 @@ WHERE (@PCodeDate BETWEEN p.dw_FromDate AND p.DW_ToDate AND S_PostCode<>3074117)
 ;
 
 Create INDEX idx_postCode on dbo.postcodersub (PostCode)
-
 ;
 
 WHILE (SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'C056_StuEngTemp')>0 
@@ -135,7 +140,9 @@ BEGIN DROP TABLE C056_StuEngTemp END
 			,s.Z_AGEJUL --f_xagej01
 			,S.NATION 
 			,Z_MODEGRP1 -- f_xqmode01
-			,dis.DISABILITY --f_xstudis01
+			-- Prefer not to say
+			,CASE WHEN DIS_98.INSTID IS NULL THEN ISNULL(DIS.DISABILITY,'95') ELSE '98' END DISABILITY --#2025LP
+			--,dis.DISABILITY --f_xstudis01
 			,S.ETHNIC
 			,S.Z_QLEVEL_CYC AS XOBTNG01
 			,s.Z_QLEVEL_CYC --F_XQOBTN01
@@ -176,8 +183,11 @@ BEGIN DROP TABLE C056_StuEngTemp END
 			ON SJ.[DK_StudentEngagement] = s.DK_StudentEngagement
 			AND SJ.DW_FromDate =@Fromdater
 			AND s.DW_FromDate=@Fromdater
-				LEFT OUTER JOIN dbo.DIS
+			LEFT OUTER JOIN dbo.DIS
 			ON DIS.INSTID = s.INSTID AND DIS.SID = s.SID
+	--List Student that said 98 Prefer not to say in one record #2025LP
+			LEFT OUTER JOIN dbo.DIS_98 
+			ON DIS_98.INSTID = S.INSTID AND DIS_98.SID = S.SID 
 			WHERE s.dw_fromdate =@fromdater AND S.Z_POPGO_CYC='1' 
 ;
 ------------------------------2022 ONLY-----------------------------------------------------
@@ -318,8 +328,10 @@ SELECT
 --,ISNULL(couk.S_County,-1) AS S_County
 ,-2 AS S_County
 ,ISNULL(ag.S_Age,-3) AS S_Age
+/*No longer required. Not used by OS and DACT join to F_FullPersonEquivalent. Unsure on exact origins of this caveat...*/
 --,CASE WHEN s.F_NATION='' THEN 73 ELSE ISNULL(na.S_Nationality,0) END AS S_Nationality  --This is what was ran at Luks request in 2018 year but I think below is better
-,CASE WHEN s.NATION='' AND  STUDYABROAD = ''    THEN 73 ELSE ISNULL(na.S_Nationality,0) END AS S_Nationality 
+--,CASE WHEN s.NATION='' AND  STUDYABROAD = ''    THEN 73 ELSE ISNULL(na.S_Nationality,0) END AS S_Nationality 
+,CAST(ISNULL(Na.S_Nationality,-1) AS INT) AS S_Nationality --#2025LP
 ,ISNULL(et.S_Ethnicity,99) AS S_Ethnicity
 --,ISNULL(et01.s_ethnicity,99) AS S_EthnicityAnalytical
 ,99 AS S_EthnicityAnalytical
@@ -331,7 +343,7 @@ SELECT
 ,ISNULL(qr.S_QualificationResult,-1) AS S_QualificationResult
 --,ISNULL(los.S_LengthOfStudy,-2) 
 ,-2 AS S_LengthOfStudy 
-,ISNULL(mos.S_mode,-2) AS S_ModeOfStudy
+,ISNULL(mos.S_mode,-5) AS S_ModeOfStudy -- changed mode default to use RDS and align with Student. #2025LP
 ,CASE WHEN g.ukprn=10007773 THEN provou.s_provider ELSE ISNULL(ISNULL(prov.S_Provider,prov2.s_provider),2719662) END AS s_provider
 ,ISNULL(cal.s_date,19000101) AS s_date
 ,REPLACE(ISNULL(socM.S_StandardOccClass,0),'$$$$',0) AS S_StandardOccClass
@@ -352,7 +364,7 @@ SELECT
 ,ISNULL(domempLoc.S_UKCountyOrCountry,99999) AS S_DomicileEmployedIn_GO
 --,ISNULL(con_GO.S_Country,-1) AS S_CountryOfStudy_GO
 ,S_CountryOfStudy_GO						=ISNULL(XSTULOCUC.S_UKCountyOrCountry,99999) 
-,ISNULL(con.S_Country,-1) AS S_countryDomiciled 
+,ISNULL(con.S_Country,332) AS S_countryDomiciled -- #2025LP ammended to align to RDS default.
 ,S_BusinessSelfEmploymentOrPortfolioIntesity =ISNULL((SELECT BSEOPI.S_Label FROM Reference.D_zJunkLabels BSEOPI WHERE BSEOPI.Field = 'intensity' AND BSEOPI.Entry = g.busempintensity AND (BSEOPI.dw_todate>=s.dw_fromdate AND BSEOPI.dw_fromdate<=s.dw_Fromdate)),3)
 ,S_EmploymentBasis  =ISNULL((SELECT EmpBas.S_Label FROM Reference.D_zJunkLabels EmpBas WHERE EmpBas.Field = 'empbasis' AND EmpBas.Entry = CASE WHEN g.empbasis='' THEN -1 ELSE g.empbasis END AND (EmpBas.dw_todate>=s.dw_fromdate AND EmpBas.dw_fromdate<=s.dw_Fromdate)),0)
 ,S_EmploymentIntensity  =ISNULL((SELECT EmpInt.S_Label FROM Reference.D_zJunkLabels EmpInt WHERE EmpInt.Field = 'intensity' AND EmpInt.Entry = g.empintensity AND (EmpInt.dw_todate>=s.dw_fromdate AND EmpInt.dw_fromdate<=s.dw_Fromdate)),3)
@@ -397,7 +409,7 @@ SELECT
 ,CAST (SUBSTRING(g.salary,1,15) AS BIGINT) AS SalaryAnnually
 ,CASE WHEN g.EMPMONTH='-3' THEN NULL ELSE CAST(g.EMPMONTH AS TINYINT) END   AS EmploymentMonthsWorked  --2020 change
 ,CAST(g.EMPYEAr AS INTEGER) AS EmploymentLength
-,CASE WHEN g.FIRSTJOB='-3'THEN  null else CAST(g.FIRSTJOB AS TINYINT) END  AS FirstJobSinceGraduating  --2020 change
+,CASE WHEN g.FIRSTJOB='-3'THEN  NULL ELSE CAST(g.FIRSTJOB AS TINYINT) END  AS FirstJobSinceGraduating  --2020 change
 ,g.PREVCOURSENUM AS PreviousNumberOfCourses
 -- Derived Fields 
 ,g.ZCURRENCY AS SalaryCurrency
@@ -408,7 +420,7 @@ SELECT
 ,@loadid	DW_LoadID
 --832445 in 56
 --crap, need to tweak RLS
-,case WHEN s.STUDYABROAD = '' THEN 1 WHEN s.STUDYABROAD = '01' THEN 2 WHEN s.STUDYABROAD = '02' THEN 3 END AS f_xhoos01
+,CASE WHEN s.STUDYABROAD = '' THEN 1 WHEN s.STUDYABROAD = '01' THEN 2 WHEN s.STUDYABROAD = '02' THEN 3 END AS f_xhoos01
 ,S_xEmploymentMarker					=CASE WHEN ISNULL(G.XWRKMARKER,'NA') ='NA' THEN -2 ELSE CAST(XWRKMARKER AS INT)  END							--1
 ,S_xActivityOnTrack						=CASE WHEN ISNULL(G.XACTONTRACK,'NA') IN ('NA','NR','UN','')   THEN -2 ELSE CAST(G.XACTONTRACK AS INT) END			--1
 ,S_xSalaryMarker						=CASE WHEN ISNULL(G.XSALMARKER,'NA') ='NA' THEN -2 ELSE CAST(XSALMARKER AS INT) END								--1  
@@ -461,7 +473,7 @@ ON s.DK_StudentEngagement = G.DK_Instance
 LEFT OUTER JOIN	[GradOutcomes].[C072_SubjectWellbeing_Individualised] SWB 
 ON		SWB.GRADUATEKEY = g.GRADUATEKEY
 AND		SWB.DW_FromDate = g.DW_FromDate
-
+ 
 LEFT OUTER JOIN 	dbo.PostCoderSub pc
 ON CAST (REPLACE(CASE WHEN SUBSTRING (s.PERMADDPOSTCODE,1,3)='BF1' THEN 'BF1' ELSE s.PERMADDPOSTCODE END  ,' ','') AS VARCHAR (8))=pc.DW_PostCodeWithNoSpacing --1
 LEFT OUTER JOIN		dbo.postcodersub pc2
@@ -662,7 +674,8 @@ AND (domBus.dw_todate>=s.dw_fromdate and domBus.dw_fromdate<=s.dw_Fromdate)
 
 LEFT OUTER JOIN Reference.D_Country con
 ON s.PERMADDCOUNTRY=con.CountryCode
-AND con.Source = 'MD' 
+--AND con.Source = 'MD'
+AND con.Source = 'RDS' -- #2025LP
 AND (con.dw_todate>=s.dw_fromdate and con.dw_fromdate<=s.dw_Fromdate)
 
 --might not need?
