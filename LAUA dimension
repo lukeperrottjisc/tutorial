@@ -1,0 +1,56 @@
+--Year 2023----------------------------------------------------------------------
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.hopper') AND type in (N'U'))
+DROP TABLE dbo.hopper;
+
+SELECT *
+INTO dbo.hopper
+FROM (
+		SELECT 
+			   N.[F_FULLPC] --4,773
+			  ,F_FULL_LAUA=ISNULL(N.[F_FULL_LAUA],'') 
+			  ,DW_FromDate =20220801
+			  ,DW_Todate = 99999999
+		FROM Static_Data.ONSDATA_23AUG N
+		UNION ALL
+			SELECT 
+			A.F_OUTPC,
+			A.F_FULL_LAUA,
+			A.DW_FromDate,
+			A.DW_Todate
+			FROM (	SELECT  [F_OUTPC]
+							,RANK() OVER ( PARTITION BY F_OUTPC  ORDER BY COUNT(F_FULL_LAUA) DESC ) InOrder 
+							,F_FULL_LAUA
+							,DW_FromDate =20220801
+							,DW_Todate = 99999999
+					FROM Static_Data.ONSDATA_23AUG
+			WHERE F_OUTPC NOT IN ('NR99','WC99','NE98') and F_FULL_LAUA <>''
+					GROUP BY F_OUTPC,F_FULL_LAUA
+			) A
+			WHERE A.InOrder=1
+	) D
+;
+
+UPDATE O SET O.DW_Todate=20220731
+FROM dbo.hopper N
+JOIN Exploitation.D_PostCode_FULL_LAUA_AtAug O ON O.F_FULLPC = N.F_FULLPC AND O.DW_Todate=99999999 AND N.F_FULL_LAUA<>O.F_FULL_LAUA
+;
+
+INSERT INTO Exploitation.D_PostCode_FULL_LAUA_AtAug (F_FULLPC,F_FULL_LAUA,DW_FromDate,DW_Todate)
+SELECT 
+       N.[F_FULLPC] --4,773
+      ,F_LSOA1=ISNULL(N.[F_FULL_LAUA],'') 
+	  ,DW_FromDate =20220801
+	  ,DW_Todate = 99999999
+FROM dbo.hopper N
+JOIN Exploitation.D_PostCode_FULL_LAUA_AtAug O ON O.F_FULLPC = N.F_FULLPC AND ISNULL(N.F_FULL_LAUA,'')<>ISNULL(O.F_FULL_LAUA,'')
+WHERE O.DW_Todate=99999999 OR O.DW_Todate=20220731
+
+INSERT INTO Exploitation.D_PostCode_FULL_LAUA_AtAug (F_FULLPC,F_FULL_LAUA,DW_FromDate,DW_Todate)
+SELECT 
+       N.[F_FULLPC] --4,773
+      ,F_LSOA1=ISNULL(N.[F_FULL_LAUA],'') 
+	  ,DW_FromDate =20220801
+	  ,DW_Todate = 99999999
+FROM dbo.hopper N
+LEFT OUTER JOIN Exploitation.D_PostCode_FULL_LAUA_AtAug O ON O.F_FULLPC = N.F_FULLPC   AND 20220801 BETWEEN O.DW_FromDate AND O.DW_Todate
+WHERE O.F_FULLPC IS NULL
